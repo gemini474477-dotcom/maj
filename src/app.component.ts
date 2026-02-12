@@ -1,4 +1,4 @@
-import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
+import { Component, signal, ChangeDetectionStrategy, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 @Component({
@@ -8,7 +8,7 @@ import { CommonModule } from '@angular/common';
   templateUrl: './app.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   // State signals
   isAuthenticated = signal<boolean>(false);
   passwordInput = signal<string>('');
@@ -16,6 +16,10 @@ export class AppComponent {
   copiedIndex = signal<number | null>(null);
   codeCopied = signal<boolean>(false);
   isChecking = signal<boolean>(false);
+  
+  // PWA Install State
+  deferredPrompt: any = null;
+  showInstallButton = signal<boolean>(false);
 
   // Decoded secret will be stored here after successful login
   decodedSecret = signal<string>('');
@@ -33,7 +37,6 @@ export class AppComponent {
   private readonly TARGET_HASH = 3343819;
   
   // ASCII byte representation of the secret string
-  // This renders the text unreadable in the source code.
   private readonly SECRET_BYTES = [
     103, 104, 34, 59, 39, 112, 91, 37, 94, 36, 51, 53, 103, 104, 102, 94, 
     38, 37, 34, 117, 106, 104, 114, 101, 117, 54, 55, 50, 51, 52, 53, 54, 
@@ -144,6 +147,31 @@ export class AppComponent {
     "https://maps.app.goo.gl/C3A9B7D2E4F6H8J7"
   ];
 
+  ngOnInit() {
+    // Listen for PWA install prompt
+    window.addEventListener('beforeinstallprompt', (e) => {
+      // Prevent Chrome 67 and earlier from automatically showing the prompt
+      e.preventDefault();
+      // Stash the event so it can be triggered later.
+      this.deferredPrompt = e;
+      // Update UI to notify the user they can add to home screen
+      this.showInstallButton.set(true);
+    });
+  }
+
+  installApp() {
+    if (this.deferredPrompt) {
+      this.deferredPrompt.prompt();
+      this.deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the A2HS prompt');
+        }
+        this.deferredPrompt = null;
+        this.showInstallButton.set(false);
+      });
+    }
+  }
+
   updatePassword(event: Event) {
     const input = event.target as HTMLInputElement;
     this.passwordInput.set(input.value);
@@ -155,17 +183,8 @@ export class AppComponent {
 
   handleLogin() {
     this.isChecking.set(true);
-    
-    // Normalize input: remove whitespace and make lowercase
-    // This allows "Maja" or "maja " to work as "maja"
     const input = this.passwordInput().trim().toLowerCase();
-    
-    // Calculate simple synchronous hash
-    // This avoids async/await crypto issues on some devices
     const hash = this.calculateHash(input);
-
-    // Debug logging for troubleshooting
-    console.log(`Input: "${input}", Hash: ${hash}, Target: ${this.TARGET_HASH}`);
 
     if (hash === this.TARGET_HASH) {
       this.isAuthenticated.set(true);
@@ -180,7 +199,6 @@ export class AppComponent {
   }
 
   // Simple string hash function (DJB2 variant)
-  // Ensures "maja" always equals 3343819
   calculateHash(str: string): number {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -224,5 +242,16 @@ export class AppComponent {
         this.codeCopied.set(false);
       }, 2000);
     });
+  }
+
+  downloadList() {
+    const content = this.links.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'maja-links.txt';
+    a.click();
+    window.URL.revokeObjectURL(url);
   }
 }
